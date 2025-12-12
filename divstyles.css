@@ -1,0 +1,39 @@
+.body{
+    background-color: black;
+}
+.common{
+    border:2px solid white;
+    position: absolute;
+}
+.nav{
+position: relative;
+float:right;
+background-color: rgb(214, 22, 22);
+z-index: 1;
+}
+.header{
+    background-color: aqua;
+    text-align: center;
+    left:0px;
+    right:0px;
+    top:0px;
+    height: auto;
+
+}
+.main{
+background-color: blanchedalmond;
+ left:0px;
+    right:0px;
+    top:23px;
+   bottom:20px;
+}
+.footer{
+    text-align: center;
+    font-style: italic;
+    font-size: smaller;
+     left:0px;
+    right:0px;
+    bottom:0px;
+    height: auto;
+    background-color: aquamarine;
+}

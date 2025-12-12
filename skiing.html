@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Downhill Ski</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #d6eaf8; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #score-board {
+            font-size: 30px;
+            font-weight: bold;
+            color: #2c3e50;
+            text-shadow: 2px 2px 0px white;
+        }
+
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            display: none;
+            pointer-events: auto;
+        }
+
+        h1 { margin: 0 0 10px 0; color: #e74c3c; }
+        p { margin: 5px 0; font-size: 18px; color: #34495e; }
+        
+        button {
+            margin-top: 20px;
+            padding: 10px 30px;
+            font-size: 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: #2980b9; }
+
+        #controls-hint {
+            text-align: center;
+            color: #555;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 white;
+            margin-bottom: 20px;
+        }
+    </style>
+    <!-- Import Three.js via JSDelivr for stability -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="score-board">Distance: 0m</div>
+        <div id="controls-hint">Use LEFT/RIGHT Arrows to Ski</div>
+    </div>
+
+    <div id="game-over">
+        <h1>CRASH!</h1>
+        <p>You hit an obstacle.</p>
+        <p id="final-score">Distance: 0m</p>
+        <button onclick="resetGame()">Try Again</button>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const SETTINGS = {
+            laneWidth: 30, // How wide the slope is
+            treeDensity: 0.15, // Chance to spawn obstacle per frame
+            baseSpeed: 0.5,
+            maxSpeed: 1.2,
+            acceleration: 0.0005,
+            turnSpeed: 0.3,
+            snowCount: 500
+        };
+
+        // --- Globals ---
+        let scene, camera, renderer;
+        let skier, ground;
+        let obstacles = []; // Array to hold trees/rocks
+        let snowParticles; // Particle system
+        
+        // Game State
+        let isGameOver = false;
+        let score = 0;
+        let speed = SETTINGS.baseSpeed;
+        let keys = { left: false, right: false };
+        let animationId;
+
+        // --- Initialization ---
+        function init() {
+            // 1. Scene & Fog (creates the snowy atmosphere)
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xd6eaf8);
+            scene.fog = new THREE.Fog(0xd6eaf8, 10, 60);
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // Camera position relative to skier will be updated in loop
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 4. Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(20, 50, 20);
+            sun.castShadow = true;
+            sun.shadow.mapSize.width = 1024;
+            sun.shadow.mapSize.height = 1024;
+            sun.shadow.camera.left = -30;
+            sun.shadow.camera.right = 30;
+            sun.shadow.camera.top = 30;
+            sun.shadow.camera.bottom = -30;
+            scene.add(sun);
+
+            // 5. Build World
+            createGround();
+            createSkier();
+            createSnow();
+
+            // 6. Input Listeners
+            window.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('keyup', handleKeyUp);
+            window.addEventListener('resize', onWindowResize);
+
+            // Start loop
+            animate();
+        }
+
+        // --- Asset Creation ---
+
+        function createGround() {
+            // A simple infinite plane illusion
+            // We actually make a plane that moves with the player
+            const geo = new THREE.PlaneGeometry(100, 200);
+            const mat = new THREE.MeshPhongMaterial({ color: 0xffffff, flatShading: true });
+            ground = new THREE.Mesh(geo, mat);
+            ground.rotation.x = -Math.PI / 2; // Flat
+            ground.receiveShadow = true;
+            scene.add(ground);
+        }
+
+        function createSkier() {
+            skier = new THREE.Group();
+
+            // Body (Red Jacket)
+            // Use CapsuleGeometry (Requires Three.js r137+)
+            const bodyGeo = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
+            const bodyMat = new THREE.MeshLambertMaterial({ color: 0xe74c3c });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1;
+            body.castShadow = true;
+            skier.add(body);
+
+            // Head
+            const headGeo = new THREE.SphereGeometry(0.4, 8, 8);
+            const headMat = new THREE.MeshLambertMaterial({ color: 0xf1c40f }); // Yellow helmet
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 1.8;
+            head.castShadow = true;
+            skier.add(head);
+
+            // Skis
+            const skiGeo = new THREE.BoxGeometry(0.2, 0.1, 2.5);
+            const skiMat = new THREE.MeshLambertMaterial({ color: 0x34495e });
+            
+            const skiL = new THREE.Mesh(skiGeo, skiMat);
+            skiL.position.set(-0.3, 0.1, 0);
+            
+            const skiR = new THREE.Mesh(skiGeo, skiMat);
+            skiR.position.set(0.3, 0.1, 0);
+
+            skier.add(skiL);
+            skier.add(skiR);
+
+            scene.add(skier);
+        }
+
+        function createTree(x, z) {
+            const treeGroup = new THREE.Group();
+
+            // Trunk
+            const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 1, 6);
+            const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.y = 0.5;
+            trunk.castShadow = true;
+            treeGroup.add(trunk);
+
+            // Leaves (Cone layers)
+            const leaveMat = new THREE.MeshLambertMaterial({ color: 0x2e7d32 });
+            
+            const l1 = new THREE.Mesh(new THREE.ConeGeometry(1.2, 2, 6), leaveMat);
+            l1.position.y = 1.5;
+            l1.castShadow = true;
+            treeGroup.add(l1);
+
+            const l2 = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.5, 6), leaveMat);
+            l2.position.y = 2.5;
+            l2.castShadow = true;
+            treeGroup.add(l2);
+
+            treeGroup.position.set(x, 0, z);
+            
+            // Collision data
+            treeGroup.userData = { type: 'obstacle', radius: 0.8 };
+            
+            scene.add(treeGroup);
+            obstacles.push(treeGroup);
+        }
+
+        function createRock(x, z) {
+            const geo = new THREE.DodecahedronGeometry(0.6);
+            const mat = new THREE.MeshLambertMaterial({ color: 0x7f8c8d });
+            const rock = new THREE.Mesh(geo, mat);
+            rock.position.set(x, 0.5, z);
+            rock.castShadow = true;
+            
+            // Random rotation
+            rock.rotation.set(Math.random(), Math.random(), Math.random());
+
+            rock.userData = { type: 'obstacle', radius: 0.6 };
+
+            scene.add(rock);
+            obstacles.push(rock);
+        }
+
+        function createSnow() {
+            const geo = new THREE.BufferGeometry();
+            const positions = [];
+            
+            // Create particles in a box around the camera
+            for(let i=0; i<SETTINGS.snowCount; i++) {
+                positions.push(
+                    (Math.random() - 0.5) * 50,
+                    Math.random() * 20,
+                    (Math.random() - 0.5) * 50
+                );
+            }
+            
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            
+            const mat = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.2,
+                transparent: true,
+                opacity: 0.8
+            });
+            
+            snowParticles = new THREE.Points(geo, mat);
+            scene.add(snowParticles);
+        }
+
+        // --- Logic ---
+
+        function spawnObstacles(currentZ) {
+            // Spawn ahead of the player
+            const spawnZ = currentZ - 60; // 60 units ahead
+
+            if (Math.random() < SETTINGS.treeDensity) {
+                // Random X position within lane
+                const x = (Math.random() - 0.5) * SETTINGS.laneWidth;
+                
+                if (Math.random() > 0.2) {
+                    createTree(x, spawnZ);
+                } else {
+                    createRock(x, spawnZ);
+                }
+            }
+        }
+
+        function cleanupObstacles() {
+            // Remove obstacles that are behind the player to save memory
+            // Skier moves in negative Z. Behind means z > skier.z
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                if (obstacles[i].position.z > skier.position.z + 10) {
+                    scene.remove(obstacles[i]);
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        function checkCollisions() {
+            const playerBox = new THREE.Box3().setFromObject(skier);
+            // Shrink box slightly for forgiveness
+            playerBox.min.x += 0.2; playerBox.max.x -= 0.2;
+
+            for (let obs of obstacles) {
+                // Simple distance check first for optimization
+                if (obs.position.distanceTo(skier.position) < 2) {
+                    // Check radius
+                    const dist = Math.sqrt(
+                        Math.pow(obs.position.x - skier.position.x, 2) + 
+                        Math.pow(obs.position.z - skier.position.z, 2)
+                    );
+                    
+                    if (dist < obs.userData.radius + 0.3) { // 0.3 is approx player radius
+                        gameOver();
+                    }
+                }
+            }
+        }
+
+        function handleInput() {
+            if (isGameOver) return;
+
+            // Tilt the skier based on input
+            if (keys.left) {
+                skier.position.x -= SETTINGS.turnSpeed;
+                skier.rotation.z = 0.3; // Lean left
+                skier.rotation.y = 0.3; // Turn skis slightly
+            } else if (keys.right) {
+                skier.position.x += SETTINGS.turnSpeed;
+                skier.rotation.z = -0.3; // Lean right
+                skier.rotation.y = -0.3;
+            } else {
+                skier.rotation.z = 0;
+                skier.rotation.y = 0;
+            }
+
+            // Keep within bounds (optional, or just let them ski into the void)
+            // Ideally keep ground moving with player
+        }
+
+        function updateSnow() {
+            // Move snow down
+            const positions = snowParticles.geometry.attributes.position.array;
+            for(let i=1; i<positions.length; i+=3) {
+                positions[i] -= 0.1; // Fall speed
+                if(positions[i] < 0) {
+                    positions[i] = 20; // Reset to top
+                }
+            }
+            snowParticles.geometry.attributes.position.needsUpdate = true;
+            
+            // Keep snow cloud centered on skier
+            snowParticles.position.x = skier.position.x;
+            snowParticles.position.z = skier.position.z;
+        }
+
+        function animate() {
+            if (!isGameOver) {
+                // 1. Move Player Forward
+                speed = Math.min(speed + SETTINGS.acceleration, SETTINGS.maxSpeed);
+                skier.position.z -= speed;
+                
+                // 2. Lateral Movement
+                handleInput();
+
+                // 3. Camera Follow
+                camera.position.set(skier.position.x, skier.position.y + 6, skier.position.z + 12);
+                camera.lookAt(skier.position.x, skier.position.y, skier.position.z - 5);
+
+                // 4. Ground Follow
+                // We move the ground plane so it's always under the player
+                ground.position.z = skier.position.z - 20; // Slight offset to cover distance
+                ground.position.x = skier.position.x;
+
+                // 5. Game Loop Logic
+                spawnObstacles(skier.position.z);
+                cleanupObstacles();
+                checkCollisions();
+                updateSnow();
+
+                // 6. Score
+                score = Math.floor(Math.abs(skier.position.z));
+                document.getElementById('score-board').innerText = `Distance: ${score}m`;
+            }
+
+            renderer.render(scene, camera);
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // --- Game Management ---
+
+        function gameOver() {
+            isGameOver = true;
+            document.getElementById('game-over').style.display = 'block';
+            document.getElementById('final-score').innerText = `Final Distance: ${score}m`;
+            
+            // Make skier fall over
+            skier.rotation.x = -Math.PI / 2;
+            skier.position.y = 0.5;
+        }
+
+        window.resetGame = function() {
+            // Remove existing obstacles
+            obstacles.forEach(o => scene.remove(o));
+            obstacles = [];
+
+            // Reset Player
+            skier.position.set(0, 0, 0);
+            skier.rotation.set(0, 0, 0);
+            
+            // Reset Stats
+            score = 0;
+            speed = SETTINGS.baseSpeed;
+            isGameOver = false;
+            
+            // UI
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('score-board').innerText = "Distance: 0m";
+        };
+
+        // --- Event Handlers ---
+
+        function handleKeyDown(e) {
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+        }
+
+        function handleKeyUp(e) {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Start safely: Ensure THREE is defined before initializing
+        window.addEventListener('load', () => {
+            if (typeof THREE !== 'undefined') {
+                init();
+            } else {
+                console.error("Three.js failed to load.");
+                document.getElementById('score-board').innerText = "Error Loading 3D Engine";
+            }
+        });
+
+    </script>
+</body>
+</html>

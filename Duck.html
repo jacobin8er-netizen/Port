@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>2D Duck Duck Goose Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #87CEEB; /* Sky/Water blue */
+            font-family: 'Comic Sans MS', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            /* Use vmin to ensure it fits on screen regardless of aspect ratio */
+            width: 80vmin;
+            height: 80vmin;
+            background: #7CFC00; /* Grass Green */
+            border-radius: 50%;
+            border: 2vmin solid #228B22; /* Darker grass border */
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        /* Pond in the middle */
+        #pond {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 30vmin;
+            height: 30vmin;
+            background: radial-gradient(circle at 30% 30%, #4fa4d6, #1E90FF);
+            border-radius: 50%;
+            border: 1vmin solid #87CEEB;
+        }
+
+        /* Status Text */
+        #status-bar {
+            position: absolute;
+            top: 20px;
+            background: white;
+            padding: 10px 30px;
+            border-radius: 20px;
+            font-size: 3vmin;
+            font-weight: bold;
+            color: #333;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 100;
+        }
+
+        /* The Kid Element */
+        .kid {
+            position: absolute;
+            width: 6vmin;
+            height: 6vmin;
+            border-radius: 50%;
+            background-color: gold;
+            border: 0.5vmin solid white;
+            transform: translate(-50%, -50%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 3vmin;
+            transition: transform 0.2s;
+            z-index: 2;
+        }
+
+        /* The Picker */
+        .picker {
+            position: absolute;
+            width: 7vmin;
+            height: 7vmin;
+            border-radius: 50%;
+            background-color: #FF8C00; /* Orange shirt */
+            border: 0.6vmin solid #fff;
+            transform: translate(-50%, -50%);
+            z-index: 5; /* Above sitting kids */
+            transition: left 0.05s linear, top 0.05s linear; /* Smooth movement */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 3.5vmin;
+        }
+
+        /* The Hat (Visual Indicator) */
+        .duck-hat {
+            position: absolute;
+            top: -2vmin;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0; 
+            height: 0; 
+            border-left: 1.5vmin solid transparent;
+            border-right: 1.5vmin solid transparent;
+            border-bottom: 3vmin solid #FFD700; /* Yellow Beak Hat */
+            z-index: 6;
+        }
+
+        /* Speech Bubble */
+        .bubble {
+            position: absolute;
+            background: white;
+            border: 0.3vmin solid #333;
+            border-radius: 1vmin;
+            padding: 0.5vmin 1.5vmin;
+            font-size: 2.5vmin;
+            font-weight: bold;
+            white-space: nowrap;
+            pointer-events: none;
+            transform: translate(-50%, -150%);
+            display: none;
+            z-index: 10;
+        }
+        .bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -0.8vmin;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 0.8vmin 0.8vmin 0;
+            border-style: solid;
+            border-color: #333 transparent transparent transparent;
+        }
+        
+        .goose-mode {
+            background-color: #ffcccc !important;
+            color: red;
+            border-color: red;
+            font-size: 3vmin;
+            transform: translate(-50%, -180%);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="status-bar">Loading...</div>
+
+    <div id="game-container">
+        <div id="pond"></div>
+        <!-- Kids and Picker added via JS -->
+        <div id="speech-bubble" class="bubble">Duck</div>
+    </div>
+
+    <script>
+        // --- Config ---
+        // We will determine sizes dynamically based on container size
+        const SETTINGS = {
+            kidCount: 10,
+            walkSpeed: 0.015, // Rad/frame (Slow)
+            chaseSpeed: 0.025, // Rad/frame (Even Slower for visibility)
+            colors: ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98FB98', '#DDA0DD', '#F0E68C', '#FFC0CB', '#87CEFA', '#D3D3D3']
+        };
+
+        // --- State ---
+        const container = document.getElementById('game-container');
+        const statusEl = document.getElementById('status-bar');
+        const bubbleEl = document.getElementById('speech-bubble');
+        
+        let kids = [];
+        let pickerEl;
+        let hatEl;
+        
+        // Size variables (calculated in init)
+        let containerSize, radius, walkRadius, centerX, centerY;
+
+        // Game Logic State
+        let pickerAngle = 0;
+        let emptySeatIndex = 0; // Index 0 starts empty
+        let gooseIndex = -1;
+        let animationFrameId;
+        
+        // --- Setup ---
+        function init() {
+            // Calculate dimensions based on rendered container size
+            const rect = container.getBoundingClientRect();
+            containerSize = rect.width; // width == height (square)
+            centerX = containerSize / 2;
+            centerY = containerSize / 2;
+            
+            // Radius is relative to container size
+            radius = containerSize * 0.35; // Sitting circle
+            walkRadius = containerSize * 0.42; // Walking path
+
+            // Create Kids
+            for (let i = 0; i < SETTINGS.kidCount; i++) {
+                const el = document.createElement('div');
+                el.className = 'kid';
+                el.style.backgroundColor = SETTINGS.colors[i];
+                el.innerText = '🧒';
+                
+                // Position
+                const angle = (i / SETTINGS.kidCount) * Math.PI * 2 - (Math.PI/2); // Start at top
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+                
+                el.style.left = x + 'px';
+                el.style.top = y + 'px';
+                
+                container.appendChild(el);
+                
+                kids.push({
+                    element: el,
+                    angle: angle,
+                    index: i,
+                    x: x,
+                    y: y,
+                    baseColor: SETTINGS.colors[i]
+                });
+            }
+
+            // Setup Initial State: Kid 0 is the Picker
+            // 1. Hide Kid 0 (Empty Seat)
+            kids[0].element.style.opacity = '0.3'; // Visual placeholder for empty seat
+            kids[0].element.innerText = '';
+            
+            // 2. Create Picker (It)
+            pickerEl = document.createElement('div');
+            pickerEl.className = 'picker';
+            pickerEl.innerText = '🏃';
+            container.appendChild(pickerEl);
+
+            // 3. Create Hat (Attached to Picker initially)
+            hatEl = document.createElement('div');
+            hatEl.className = 'duck-hat';
+            pickerEl.appendChild(hatEl); // Child of picker moves with picker
+
+            // Position Picker at empty seat angle but at walk radius
+            emptySeatIndex = 0;
+            pickerAngle = kids[0].angle;
+            updatePickerPos();
+
+            // Start Loop
+            statusEl.innerText = "Game Starting!";
+            setTimeout(startRound, 1000);
+        }
+
+        // --- Utility ---
+        function updatePickerPos() {
+            const x = centerX + Math.cos(pickerAngle) * walkRadius;
+            const y = centerY + Math.sin(pickerAngle) * walkRadius;
+            pickerEl.style.left = x + 'px';
+            pickerEl.style.top = y + 'px';
+        }
+
+        function showBubble(text, x, y, isGoose = false) {
+            bubbleEl.innerText = text;
+            bubbleEl.style.left = x + 'px';
+            bubbleEl.style.top = y + 'px';
+            bubbleEl.style.display = 'block';
+            
+            if(isGoose) bubbleEl.classList.add('goose-mode');
+            else bubbleEl.classList.remove('goose-mode');
+        }
+
+        function hideBubble() {
+            bubbleEl.style.display = 'none';
+        }
+
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+        // --- Game Flow ---
+
+        async function startRound() {
+            statusEl.innerText = "Picker is walking...";
+            
+            // Random ducks count
+            const ducks = Math.floor(Math.random() * 4) + 1;
+            let ducksDone = 0;
+            
+            let walking = true;
+            
+            // Animation Loop for Walking
+            const walkLoop = async () => {
+                if (!walking) return;
+
+                pickerAngle += SETTINGS.walkSpeed;
+                
+                // Normalize
+                let currentNormAngle = pickerAngle % (Math.PI * 2);
+                if (currentNormAngle < 0) currentNormAngle += Math.PI * 2;
+
+                updatePickerPos();
+
+                // Check proximity to kids
+                let tappedKid = null;
+                for(let k of kids) {
+                    // Skip empty seat
+                    if(k.index === emptySeatIndex) continue;
+
+                    // Calculate distance
+                    const px = parseFloat(pickerEl.style.left);
+                    const py = parseFloat(pickerEl.style.top);
+                    const dist = Math.hypot(px - k.x, py - k.y);
+
+                    // Threshold based on container size (approx 10% of container)
+                    const threshold = containerSize * 0.1;
+
+                    if(dist < threshold) {
+                        // Check if we just tapped them (debounce)
+                        if(!k.justTapped) {
+                            tappedKid = k;
+                        }
+                    } else {
+                        k.justTapped = false; // Reset flag when away
+                    }
+                }
+
+                if(tappedKid) {
+                    tappedKid.justTapped = true;
+                    walking = false; // Pause walking to tap
+                    
+                    if(ducksDone < ducks) {
+                        // DUCK
+                        showBubble("Duck", tappedKid.x, tappedKid.y);
+                        await wait(600);
+                        hideBubble();
+                        ducksDone++;
+                        walking = true;
+                        requestAnimationFrame(walkLoop);
+                    } else {
+                        // GOOSE!
+                        gooseIndex = tappedKid.index;
+                        triggerChase(tappedKid);
+                    }
+                } else {
+                    requestAnimationFrame(walkLoop);
+                }
+            };
+
+            requestAnimationFrame(walkLoop);
+        }
+
+        async function triggerChase(gooseKid) {
+            statusEl.innerText = "GOOSE! The chase is on!";
+            showBubble("GOOSE!", gooseKid.x, gooseKid.y, true);
+            
+            // Visual flair for goose
+            gooseKid.element.style.transform = "translate(-50%, -50%) scale(1.3)";
+            gooseKid.element.style.backgroundColor = "red";
+            
+            await wait(1000);
+            hideBubble();
+
+            // Determine Winner
+            // 60% Picker wins (safe), 40% Goose wins (tag)
+            const pickerSafe = Math.random() > 0.4;
+
+            // Target is empty seat angle.
+            const targetAngle = kids[emptySeatIndex].angle;
+            let gooseAngle = gooseKid.angle;
+            
+            let running = true;
+            
+            // Helper to normalize angle for distance calculation
+            // We need to measure arc distance in the direction of movement (CCW/Increasing Angle)
+            const getDistance = (start, end) => {
+               let s = start % (Math.PI * 2); if (s < 0) s += Math.PI * 2;
+               let e = end % (Math.PI * 2); if (e < 0) e += Math.PI * 2;
+               let diff = e - s;
+               if (diff < 0) diff += Math.PI * 2;
+               return diff;
+            };
+
+            const runLoop = () => {
+                if(!running) return;
+
+                // Picker moves
+                pickerAngle += SETTINGS.chaseSpeed;
+                updatePickerPos();
+
+                // Goose moves (Simulation logic)
+                let gSpeed = SETTINGS.chaseSpeed;
+                if(!pickerSafe) gSpeed *= 1.03; // Slightly faster goose catches up
+                else gSpeed *= 0.97; // Slightly slower goose fails
+
+                gooseAngle += gSpeed;
+
+                // Distances
+                // Distance from Picker to Target Seat
+                let distToSeat = getDistance(pickerAngle, targetAngle);
+                
+                // Distance from Goose to Picker (Is goose catching up?)
+                let distGooseToPicker = getDistance(gooseAngle, pickerAngle);
+
+                // Check End Conditions
+                
+                // 1. Picker Reaches Seat (Small distance forward)
+                // We use a threshold slightly larger than speed to ensure we don't skip over it
+                if (distToSeat < SETTINGS.chaseSpeed * 1.5) {
+                    // If Goose is NOT extremely close
+                    // (Distance > threshold implies Goose hasn't caught up)
+                    // We check 'distGooseToPicker'. Since Goose is behind, the distance FROM goose TO picker should be small positive.
+                    // Actually, getDistance(goose, picker) is the arc length the Goose has to run to hit picker.
+                    // If that distance is large (e.g. > 0.2 rads), Picker is safe.
+                    
+                    if (distGooseToPicker > 0.15) {
+                        resolve('SAFE', gooseKid);
+                        running = false;
+                        return;
+                    }
+                }
+
+                // 2. Goose Catches Picker
+                // If the distance from Goose to Picker is tiny (caught up)
+                // OR if Goose somehow passed picker (distance became huge due to wrap)
+                // Ideally: distGooseToPicker < small threshold
+                if (distGooseToPicker < 0.1) {
+                    resolve('CAUGHT', gooseKid);
+                    running = false;
+                    return;
+                }
+
+                requestAnimationFrame(runLoop);
+            };
+            
+            // Helper to visually move the Goose around the circle
+            const visualRunLoop = () => {
+                if(!running) return;
+                
+                const gx = centerX + Math.cos(gooseAngle) * walkRadius;
+                const gy = centerY + Math.sin(gooseAngle) * walkRadius;
+                gooseKid.element.style.left = gx + 'px';
+                gooseKid.element.style.top = gy + 'px';
+                
+                requestAnimationFrame(visualRunLoop);
+            };
+            
+            // Start loops
+            runLoop();
+            visualRunLoop();
+        }
+
+        async function resolve(outcome, gooseKid) {
+            if (outcome === 'SAFE') {
+                statusEl.innerText = "Picker Sat Down Safely!";
+                
+                // 1. Picker moves to empty seat coords
+                const seat = kids[emptySeatIndex];
+                pickerEl.style.left = seat.x + 'px';
+                pickerEl.style.top = seat.y + 'px';
+                
+                await wait(1000);
+
+                // 2. The Swap Logic
+                // Old Picker (orange) becomes a sitting kid at emptySeatIndex.
+                kids[emptySeatIndex].element.style.opacity = '1';
+                kids[emptySeatIndex].element.innerText = '🧒';
+                kids[emptySeatIndex].element.style.backgroundColor = '#FF8C00'; // Color of picker shirt
+
+                // 3. Pass the Hat
+                // Hat moves from PickerEl to GooseEl
+                hatEl.remove();
+                gooseKid.element.appendChild(hatEl);
+                // Use vmin for hat position
+                hatEl.style.top = '-4vmin'; // Adjust for kid sizing
+
+                statusEl.innerText = "Passing the Duck Hat...";
+                await wait(1500);
+
+                // 4. Goose becomes new Picker
+                hatEl.remove(); // Remove from goose kid element
+                
+                // Reset Goose Element visual to be the empty seat
+                gooseKid.element.style.transform = "translate(-50%, -50%) scale(1)";
+                gooseKid.element.style.backgroundColor = "rgba(0,0,0,0)"; // Transparent
+                gooseKid.element.style.opacity = '0.3';
+                gooseKid.element.innerText = '';
+                
+                // Snap visual goose back to seat position
+                gooseKid.element.style.left = gooseKid.x + 'px';
+                gooseKid.element.style.top = gooseKid.y + 'px';
+
+                // Move Global Picker to Goose's start position (new empty seat)
+                pickerEl.appendChild(hatEl); // Picker gets hat back
+                pickerAngle = gooseKid.angle;
+                updatePickerPos();
+                
+                // Update State Indices
+                emptySeatIndex = gooseKid.index;
+
+                statusEl.innerText = "Goose is now It!";
+
+            } else {
+                statusEl.innerText = "TAGGED! Picker is still It!";
+                
+                // Goose goes back to seat
+                gooseKid.element.style.transform = "translate(-50%, -50%) scale(1)";
+                gooseKid.element.style.backgroundColor = gooseKid.baseColor;
+                gooseKid.element.style.left = gooseKid.x + 'px';
+                gooseKid.element.style.top = gooseKid.y + 'px';
+                
+                // Picker stays picker (hat stays)
+            }
+
+            await wait(2000);
+            startRound();
+        }
+
+        // Start
+        init();
+
+        // Handle window resize to keep circles correct
+        window.addEventListener('resize', () => {
+            // Simple reload to recalc positions (easiest for this architecture)
+            // Or we could update coords logic. 
+            // Ideally for a production app we'd update coords, but for this sim, a reload ensures layout integrity.
+            location.reload(); 
+        });
+
+    </script>
+</body>
+</html>

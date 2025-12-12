@@ -1,0 +1,56 @@
+/* RUBRIC: Custom background color */
+/* RUBRIC: Style that specifies font family */
+body {
+    background-color: #e3f2fd; /* Light Blue background */
+    font-family: 'Verdana', sans-serif;
+    margin: 20px;
+}
+
+/* RUBRIC: Style that specifies font color */
+h1 {
+    color: #2c3e50; /* Dark Blue */
+    text-align: center;
+    text-transform: uppercase;
+    border-bottom: 5px solid #ff4757; /* Red accent line */
+}
+
+h2, h3, h6 {
+    color: #57606f;
+}
+
+/* RUBRIC: Styling for div blocks (1 of 3) */
+.nav-container {
+    text-align: right;
+    margin-bottom: 20px;
+}
+
+/* Styling for the link back to resume */
+.nav-btn {
+    text-decoration: none;
+    background-color: #2c3e50;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    font-weight: bold;
+}
+
+.nav-btn:hover {
+    background-color: #ff4757;
+}
+
+/* RUBRIC: Styling for div blocks (2 of 3) */
+.content-box {
+    background-color: #ffffff;
+    border: 2px solid #2f3542;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 10px;
+    box-shadow: 5px 5px 15px rgba(0,0,0,0.2);
+}
+
+/* RUBRIC: Styling for div blocks (3 of 3) */
+.tableau-container {
+    background-color: white;
+    padding: 15px;
+    border: 1px dashed black;
+}
